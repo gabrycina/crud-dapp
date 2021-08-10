@@ -11,6 +11,10 @@ import { AddressTranslator } from 'nervos-godwoken-integration';
 
 import { CrudWrapper } from '../lib/contracts/CRUDWrapper';
 import { CONFIG } from '../config';
+import { Address } from 'cluster';
+
+const CompiledContractArtifact = require(`../../build/contracts/ERC20.json`);
+const SUDT_ADDRESS = '0xe65Ba094fB061b0111cd4BD2f5dB0F8fbb99F6Cc'
 
 async function createWeb3() {
     // Modern dapp browsers...
@@ -59,16 +63,19 @@ export function App() {
     const [editName, setEditName] = useState<string | undefined>();
     const [deletedUser, setDeletedUser] = useState<number| undefined>();
     const [newDeletedUser, setNewDeletedUser] = useState<number| undefined>();
-
     const [deployTxHash, setDeployTxHash] = useState<string | undefined>();
     const [polyjuiceAddress, setPolyjuiceAddress] = useState<string | undefined>();
     const [transactionInProgress, setTransactionInProgress] = useState(false);
     const toastId = React.useRef(null);
+    const [depositAddress, setDepositAddress] = useState<string | undefined>();
+    const [l2Address, setL2Address] = useState<string | undefined>();
+    const [sudtBalance, setSudtBalance] = useState<number | 0>();
 
     useEffect(() => {
         if (accounts?.[0]) {
             const addressTranslator = new AddressTranslator();
             setPolyjuiceAddress(addressTranslator.ethAddressToGodwokenShortAddress(accounts?.[0]));
+            createDepositAddress();
         } else {
             setPolyjuiceAddress(undefined);
         }
@@ -96,6 +103,14 @@ export function App() {
     }, [transactionInProgress, toastId.current]);
 
     const account = accounts?.[0];
+
+    async function createDepositAddress(){
+        const addressTranslator = new AddressTranslator();
+        const tmp = await addressTranslator.getLayer2DepositAddress(web3, accounts[0]);
+        setDepositAddress(tmp.addressString);
+
+        console.log(`Layer 2 Deposit Address on Layer 1: \n${depositAddress}`);
+    }
 
     async function deployContract() {
         const _contract = new CrudWrapper(web3);
@@ -162,6 +177,26 @@ export function App() {
         setDeletedUser(deletedUser);
     }
 
+    // Get L2 Address for Force Bridge
+    async function getL2Address(_web3: Web3, _account: string) {
+        console.log(`getL2Address: \n${_web3}`);
+        const addressTranslator = new AddressTranslator();
+        const depositAddress = await addressTranslator.getLayer2DepositAddress(_web3, _account);
+
+        console.log(`Layer 2 Deposit Address on Layer 1: \n${depositAddress.addressString}`);
+        return depositAddress.addressString;
+    }
+
+    async function getSUDTBalance(_web3: Web3, _account: string, _polyjuiceAddress: string) {
+        console.log(`PolyjuiceAddress: \n${_polyjuiceAddress}`);
+
+        const _contract = new _web3.eth.Contract(CompiledContractArtifact.abi, SUDT_ADDRESS);
+        const balance = await _contract.methods.balanceOf(_polyjuiceAddress).call({
+            from: account
+        });
+        return balance;
+    }
+
     useEffect(() => {
         if (web3) {
             return;
@@ -178,6 +213,21 @@ export function App() {
             if (_accounts && _accounts[0]) {
                 const _l2Balance = BigInt(await _web3.eth.getBalance(_accounts[0]));
                 setL2Balance(_l2Balance);
+                
+                const _l2Address = await getL2Address(_web3, _accounts[0]);
+                setL2Address(_l2Address);
+
+                const addressTranslator = new AddressTranslator();
+                const _polyjuiceAddress = addressTranslator.ethAddressToGodwokenShortAddress(
+                    _accounts[0]
+                );
+
+                console.log(`Polyjuice Address: ${_polyjuiceAddress}\n`);
+                console.log(
+                    `Checking SUDT balance using proxy contract with address: ${SUDT_ADDRESS}...`
+                );
+                const _balance = await getSUDTBalance(_web3, _accounts[0], _polyjuiceAddress);
+                setSudtBalance(_balance);
             }
         })();
     });
@@ -199,6 +249,9 @@ export function App() {
             Deployed contract address: <b>{contract?.address || '-'}</b> <br />
             Deploy transaction hash: <b>{deployTxHash || '-'}</b>
             <br />
+            Your L2 Deposit address (Input this ad RECIPIENT address in <a href="https://force-bridge-test.ckbapp.dev/bridge/Ethereum/Nervos?xchain-asset=0x0000000000000000000000000000000000000000" className="">Force Bridge</a>): <b>{depositAddress}</b>
+            <br />
+            <br />
             <hr />
             <button onClick={deployContract} disabled={!l2Balance}>
                 Deploy contract
@@ -216,6 +269,14 @@ export function App() {
             </button>
             <br />
             <br />
+            {sudtBalance && (
+                <div className="show-addr mb-2">
+                    SUDT Balance: <b>{sudtBalance}</b>
+                </div>
+            )}
+            <br />
+            <br />
+
 
             <div className="container">
                 <div className="row">
